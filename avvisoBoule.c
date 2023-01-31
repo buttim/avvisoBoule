@@ -1,14 +1,49 @@
 //!make
 #include "STC15F2K60S2.h"
 #include <stdbool.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 #define _nop_() __asm nop __endasm
 #define BV(x) (1<<(x))
 
-#define FOSC                11059200UL
+#define FOSC                11059200U
+#define ENABLE_IAP  0x82            //if SYSCLK<20MHz
+#define CMD_READ    1
+
+typedef unsigned char BYTE;
+typedef unsigned short WORD;
 
 volatile bool f1ms,stop=false;
-volatile unsigned int t=0xD4CD;
+unsigned short tVal;
+
+void IapIdle() {
+    IAP_CONTR = 0;
+    IAP_CMD = 0;
+    IAP_TRIG = 0;
+    IAP_ADDRH = 0x80;
+    IAP_ADDRL = 0;
+}
+
+BYTE IapReadByte(WORD addr) {
+    BYTE dat;
+
+    IAP_CONTR = ENABLE_IAP;
+    IAP_CMD = CMD_READ;
+    IAP_ADDRL = addr;
+    IAP_ADDRH = addr >> 8;
+    IAP_TRIG = 0x5a;
+    IAP_TRIG = 0xa5;
+    _nop_();
+    dat = IAP_DATA;
+    IapIdle();
+
+    return dat;
+}
+
+WORD IapReadWord(WORD addr) {
+	return IapReadByte(addr)+256*IapReadByte(addr+1);
+}
 
 void Timer0Init(void)	{	//1ms@11.0592MHz
 	AUXR|=0x80;		//Timer clock is 1T mode
@@ -20,11 +55,11 @@ void Timer0Init(void)	{	//1ms@11.0592MHz
 	ET0=1;
 }
 
-void Timer2Init(void) {	//1ms@11.0592MHz
-	AUXR|=0x04;		//imer clock is 1T mode
-	T2L=0xCD;		//Initial timer value
-	T2H=0xD4;		//Initial timer value
-	IE2|=4;//ET2=1;
+void Timer2Init(void) {		//1ms@11.0592MHz
+	AUXR|=0x04;		//timer clock is 1T mode
+	//~ T2L=0xCD;		//Initial timer value
+	//~ T2H=0xD4;		//Initial timer value
+	IE2|=4;			//enable interrupt for timer 2
 }
 
 void tm0(void) __interrupt 1 __using 1 {
@@ -34,10 +69,10 @@ void tm0(void) __interrupt 1 __using 1 {
 }
 
 void tm2(void) __interrupt 12 __using 1 {
-	T2L=t;		//Initial timer value
-	T2H=t>>8;		//Initial timer value
-	P10=!P10;
-	P11=!P11;
+	T2L=tVal;
+	T2H=tVal>>8;
+	P10^=1;
+	P11^=1;
 }
 
 void int0(void) __interrupt 0 __using 1 {
@@ -54,7 +89,7 @@ void Delay1ms(int n) {
 	}
 }
 
-bool light() {
+bool light() {	//debounce reading from LED
 	int i,val=0;
 	for (i=0;i<25;i++) {
 		val = (5+val * 9 + P32 * 10) / 10;
@@ -63,8 +98,9 @@ bool light() {
 	return val>5;
 }
 
+
 void main(void) {
-	int i;
+	static int i;
 	
 	P5M0|=BV(5);			//P5.5 in push-pull mode
 	P5M1&=~BV(5);
@@ -88,26 +124,42 @@ void main(void) {
 	EA=1;	//enable interrupts
 
 	for (;;) {
-		Delay1ms(200);
+		Delay1ms(200);	//wait for signal to stabilize
 		if (!light()) {
 			stop=false;
 			P55=1;
 			AUXR|=BV(4);
-			for (i=0;i<30 && !stop;i++) {
+			i=0;
+			while (!stop) {
+				WORD t=IapReadWord(i),
+					duration=IapReadWord(i+2);
+				if (duration==0) break;
+				if (t!=0) {
+					tVal=t;
+					AUXR|=BV(4);
+				}
+				int delay=3000/duration;
+				Delay1ms(delay);
+				AUXR&=~BV(4);
+				Delay1ms(50);
+				if (light()) break;
+				i+=4;
+			}
+			/*for (i=0;i<30 && !stop;i++) {
 				//P55=1;
-				t=0xD4CD;
+				tVal=0xD4CD;
 				Delay1ms(300);
 				if (light()) break;
 				//P55=0;
-				t=0xEA00;
+				tVal=0xEA00;
 				Delay1ms(300);
 				if (light()) break;
-			}
+			}*/
 		}
 		else {
 			stop=false;
 			P55=0;
-			t=0xD4CD;
+			tVal=0xD4CD;
 			for (i=0;i<3 && !stop;i++) {
 				//P55=1;
 				AUXR|=BV(4);
@@ -118,16 +170,17 @@ void main(void) {
 				Delay1ms(100);
 			}
 		}
+		EX1=0;	//INT1 disable
 		P55=0;
 		P10=0;
 		P11=0;
 		AUXR&=~BV(4);
-		Delay1ms(1000);
 		PCON=BV(1);		//power down
 		_nop_();
 		_nop_();
 		P10=0;
 		P11=1;
+		EX1=1;	//INT1 enable
 	}
 }
 

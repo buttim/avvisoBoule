@@ -1,4 +1,4 @@
-SDCCOPTS ?= --iram-size 128
+SDCCOPTS ?= --iram-size 128 --opt-code-size --model-small
 
 SRC=avvisoBoule.c 
 #SRC = $(wildcard *.c)
