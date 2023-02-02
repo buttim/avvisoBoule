@@ -11,8 +11,11 @@
 #define ENABLE_IAP  0x82            //if SYSCLK<20MHz
 #define CMD_READ    1
 
-typedef unsigned char BYTE;
-typedef unsigned short WORD;
+#define LED	P55
+#define SENSOR	P32	//INT0
+#define BUTTON	P33	//INT1
+#define BUZZER_PLUS	P11
+#define BUZZER_MINUS	P10
 
 volatile bool f1ms,stop=false;
 unsigned short tVal;
@@ -25,8 +28,8 @@ void IapIdle() {
     IAP_ADDRL = 0;
 }
 
-BYTE IapReadByte(WORD addr) {
-    BYTE dat;
+uint8_t IapReaduint8_t(uint16_t addr) {
+    uint8_t dat;
 
     IAP_CONTR = ENABLE_IAP;
     IAP_CMD = CMD_READ;
@@ -37,12 +40,11 @@ BYTE IapReadByte(WORD addr) {
     _nop_();
     dat = IAP_DATA;
     IapIdle();
-
     return dat;
 }
 
-WORD IapReadWord(WORD addr) {
-	return IapReadByte(addr)+256*IapReadByte(addr+1);
+uint16_t IapReaduint16_t(uint16_t addr) {
+	return IapReaduint8_t(addr)+256*IapReaduint8_t(addr+1);
 }
 
 void Timer0Init(void)	{	//1ms@11.0592MHz
@@ -55,10 +57,8 @@ void Timer0Init(void)	{	//1ms@11.0592MHz
 	ET0=1;
 }
 
-void Timer2Init(void) {		//1ms@11.0592MHz
+void Timer2Init(void) {
 	AUXR|=0x04;		//timer clock is 1T mode
-	//~ T2L=0xCD;		//Initial timer value
-	//~ T2H=0xD4;		//Initial timer value
 	IE2|=4;			//enable interrupt for timer 2
 }
 
@@ -71,8 +71,8 @@ void tm0(void) __interrupt 1 __using 1 {
 void tm2(void) __interrupt 12 __using 1 {
 	T2L=tVal;
 	T2H=tVal>>8;
-	P10^=1;
-	P11^=1;
+	BUZZER_MINUS^=1;
+	BUZZER_PLUS^=1;
 }
 
 void int0(void) __interrupt 0 __using 1 {
@@ -89,10 +89,10 @@ void Delay1ms(int n) {
 	}
 }
 
-bool light() {	//debounce reading from LED
+bool light() {				//debounce reading from sensor LED
 	int i,val=0;
 	for (i=0;i<25;i++) {
-		val = (5+val * 9 + P32 * 10) / 10;
+		val = (5+val * 9 + SENSOR * 10) / 10;
 		Delay1ms(1);
 	}
 	return val>5;
@@ -104,12 +104,12 @@ void main(void) {
 	
 	P5M0|=BV(5);			//P5.5 in push-pull mode
 	P5M1&=~BV(5);
-	P55=0;
+	LED=0;
 	
 	P1M0|=BV(0)|BV(1);	//P1.0 and P1.1 in push-pull mode
 	P1M1&=~(BV(0)|BV(1));	
-	P10=0;
-	P11=1;
+	BUZZER_MINUS=0;
+	BUZZER_PLUS=1;
 	
 	P3M0&=~BV(2);		//P3.2/INT0 input only
 	P3M1|=BV(2);
@@ -117,22 +117,22 @@ void main(void) {
 	Timer0Init();
 	Timer2Init();
 	
-	IT0=0;	//INT0 on both edges
-	IT1=1;	//INT1 on falling edge
-	EX0=1;	//INT0 enable
-	EX1=1;	//INT1 enable
-	EA=1;	//enable interrupts
-
+	IT0=0;				//INT0 on both edges
+	IT1=1;				//INT1 on falling edge
+	EX0=1;				//INT0 enable
+	EX1=1;				//INT1 enable
+	EA=1;				//enable interrupts
+	
 	for (;;) {
 		Delay1ms(200);	//wait for signal to stabilize
 		if (!light()) {
 			stop=false;
-			P55=1;
+			LED=1;
 			AUXR|=BV(4);
 			i=0;
 			while (!stop) {
-				WORD t=IapReadWord(i),
-					duration=IapReadWord(i+2);
+				uint16_t t=IapReaduint16_t(i),
+					duration=IapReaduint16_t(i+2);
 				if (duration==0) break;
 				if (t!=0) {
 					tVal=t;
@@ -145,42 +145,30 @@ void main(void) {
 				if (light()) break;
 				i+=4;
 			}
-			/*for (i=0;i<30 && !stop;i++) {
-				//P55=1;
-				tVal=0xD4CD;
-				Delay1ms(300);
-				if (light()) break;
-				//P55=0;
-				tVal=0xEA00;
-				Delay1ms(300);
-				if (light()) break;
-			}*/
 		}
 		else {
 			stop=false;
-			P55=0;
+			LED=0;
 			tVal=0xD4CD;
 			for (i=0;i<3 && !stop;i++) {
-				//P55=1;
 				AUXR|=BV(4);
 				Delay1ms(100);
 
-				//P55=0;
 				AUXR&=~BV(4);
 				Delay1ms(100);
 			}
 		}
-		EX1=0;	//INT1 disable
-		P55=0;
-		P10=0;
-		P11=0;
+		EX1=0;			//INT1 disable
+		LED=0;
+		BUZZER_MINUS=0;
+		BUZZER_PLUS=0;
 		AUXR&=~BV(4);
 		PCON=BV(1);		//power down
 		_nop_();
 		_nop_();
-		P10=0;
-		P11=1;
-		EX1=1;	//INT1 enable
+		BUZZER_MINUS=0;
+		BUZZER_PLUS=1;
+		EX1=1;			//INT1 enable
 	}
 }
 
