@@ -7,18 +7,19 @@
 #define _nop_() __asm nop __endasm
 #define BV(x) (1<<(x))
 
-#define FOSC                11059200U
-#define ENABLE_IAP  0x82            //if SYSCLK<20MHz
-#define CMD_READ    1
+#define FOSC		11059200U
+#define ENABLE_IAP  	0x82	//if SYSCLK<20MHz
+#define CMD_READ    	1
 
-#define LED	P55
-#define SENSOR	P32	//INT0
-#define BUTTON	P33	//INT1
-#define BUZZER_PLUS	P11
-#define BUZZER_MINUS	P10
+#define LED		P55
+#define SENSOR		P32	//INT0
+#define BUTTON		P33	//INT1
+#define BUZZER_PLUS	P10
+#define BUZZER_MINUS	P11
 
 volatile bool f1ms,stop=false;
 unsigned short tVal;
+bool firstRun=true;
 
 void IapIdle() {
     IAP_CONTR = 0;
@@ -52,8 +53,8 @@ void Timer0Init(void)	{	//1ms@11.0592MHz
 	TMOD&=0xF0;		//Set timer work mode
 	TL0=0xCD;		//Initial timer value
 	TH0=0xD4;		//Initial timer value
-	TF0=0;		//Clear TF0 flag
-	TR0=1;		//Timer0 start run
+	TF0=0;			//Clear TF0 flag
+	TR0=1;			//Timer0 start run
 	ET0=1;
 }
 
@@ -75,8 +76,7 @@ void tm2(void) __interrupt 12 __using 1 {
 	BUZZER_PLUS^=1;
 }
 
-void int0(void) __interrupt 0 __using 1 {
-}
+void int0(void) __interrupt 0 __using 1 {}
 
 void int1(void) __interrupt 2 __using 1 {
 	stop=true;
@@ -98,7 +98,6 @@ bool light() {				//debounce reading from sensor LED
 	return val>5;
 }
 
-
 void main(void) {
 	static int i;
 	
@@ -106,12 +105,12 @@ void main(void) {
 	P5M1&=~BV(5);
 	LED=0;
 	
-	P1M0|=BV(0)|BV(1);	//P1.0 and P1.1 in push-pull mode
+	P1M0|=BV(0)|BV(1);		//P1.0 and P1.1 in push-pull mode
 	P1M1&=~(BV(0)|BV(1));	
 	BUZZER_MINUS=0;
 	BUZZER_PLUS=1;
 	
-	P3M0&=~BV(2);		//P3.2/INT0 input only
+	P3M0&=~BV(2);			//P3.2/INT0 input only
 	P3M1|=BV(2);
 	
 	Timer0Init();
@@ -124,36 +123,38 @@ void main(void) {
 	EA=1;				//enable interrupts
 	
 	for (;;) {
-		Delay1ms(200);	//wait for signal to stabilize
+		Delay1ms(200);		//wait for signal to stabilize
 		if (!light()) {
-			stop=false;
-			LED=1;
-			AUXR|=BV(4);
-			i=0;
-			while (!stop) {
-				uint16_t t=IapReaduint16_t(i),
-					duration=IapReaduint16_t(i+2);
-				if (duration==0) break;
-				if (t!=0) {
-					tVal=t;
-					AUXR|=BV(4);
+			if (!firstRun) {
+				stop=false;
+				LED=1;
+				AUXR|=BV(4);
+				i=0;
+				while (!stop) {
+					uint16_t t=IapReaduint16_t(i),
+						duration=IapReaduint16_t(i+2);
+					if (duration==0) break;
+					if (t!=0) {
+						tVal=t;
+						AUXR|=BV(4);
+					}
+					int delay=3000/duration;
+					Delay1ms(delay);
+					AUXR&=~BV(4);
+					Delay1ms(50);
+					if (light()) break;
+					i+=4;
 				}
-				int delay=3000/duration;
-				Delay1ms(delay);
-				AUXR&=~BV(4);
-				Delay1ms(50);
-				if (light()) break;
-				i+=4;
 			}
 		}
 		else {
+			firstRun=false;
 			stop=false;
 			LED=0;
 			tVal=0xD4CD;
 			for (i=0;i<3 && !stop;i++) {
 				AUXR|=BV(4);
 				Delay1ms(100);
-
 				AUXR&=~BV(4);
 				Delay1ms(100);
 			}
