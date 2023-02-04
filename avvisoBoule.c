@@ -1,7 +1,6 @@
 //!make
 #include "STC15F2K60S2.h"
 #include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
 
 #define _nop_() __asm nop __endasm
@@ -20,6 +19,7 @@
 volatile bool f1ms,stop=false;
 unsigned short tVal;
 bool firstRun=true;
+int nSongs;
 
 void IapIdle() {
     IAP_CONTR = 0;
@@ -29,7 +29,7 @@ void IapIdle() {
     IAP_ADDRL = 0;
 }
 
-uint8_t IapReaduint8_t(uint16_t addr) {
+uint8_t IapReadByte(uint16_t addr) {
     uint8_t dat;
 
     IAP_CONTR = ENABLE_IAP;
@@ -44,8 +44,8 @@ uint8_t IapReaduint8_t(uint16_t addr) {
     return dat;
 }
 
-uint16_t IapReaduint16_t(uint16_t addr) {
-	return IapReaduint8_t(addr)+256*IapReaduint8_t(addr+1);
+uint16_t IapReadWord(uint16_t addr) {
+	return IapReadByte(addr)+256*IapReadByte(addr+1);
 }
 
 void Timer0Init(void)	{	//1ms@11.0592MHz
@@ -92,10 +92,30 @@ void Delay1ms(int n) {
 bool light() {				//debounce reading from sensor LED
 	int i,val=0;
 	for (i=0;i<25;i++) {
-		val = (5+val * 9 + SENSOR * 10) / 10;
+		val=(8+val*15+SENSOR*16)>>4;
 		Delay1ms(1);
 	}
 	return val>5;
+}
+
+void play() {
+	int n;
+	for (n=T2L^T2H;n>nSongs;n-=nSongs); //modulo without division (too much code bloat)
+	int i=IapReadWord(2+2*n);
+	while (!stop) {
+		uint16_t t=IapReadWord(i),
+			duration=IapReadWord(i+2);
+		if (duration==0) break;
+		if (t!=0) {
+			tVal=t;
+			AUXR|=BV(4);
+		}
+		Delay1ms(duration);
+		AUXR&=~BV(4);
+		Delay1ms(50);
+		if (light()) break;
+		i+=4;
+	}
 }
 
 void main(void) {
@@ -122,29 +142,15 @@ void main(void) {
 	EX1=1;				//INT1 enable
 	EA=1;				//enable interrupts
 	
+	nSongs=IapReadWord(0);
+	
 	for (;;) {
 		Delay1ms(200);		//wait for signal to stabilize
 		if (!light()) {
 			if (!firstRun) {
 				stop=false;
 				LED=1;
-				AUXR|=BV(4);
-				i=0;
-				while (!stop) {
-					uint16_t t=IapReaduint16_t(i),
-						duration=IapReaduint16_t(i+2);
-					if (duration==0) break;
-					if (t!=0) {
-						tVal=t;
-						AUXR|=BV(4);
-					}
-					int delay=3000/duration;
-					Delay1ms(delay);
-					AUXR&=~BV(4);
-					Delay1ms(50);
-					if (light()) break;
-					i+=4;
-				}
+				play();
 			}
 		}
 		else {
@@ -154,7 +160,7 @@ void main(void) {
 			tVal=0xD4CD;
 			for (i=0;i<3 && !stop;i++) {
 				AUXR|=BV(4);
-				Delay1ms(100);
+				Delay1ms(70*i);
 				AUXR&=~BV(4);
 				Delay1ms(100);
 			}
