@@ -98,22 +98,22 @@ bool light() {				//debounce reading from sensor LED
 	return val>5;
 }
 
-void play() {
-	int n;
-	for (n=T2L^T2H;n>nSongs;n-=nSongs); //modulo without division (too much code bloat)
+void play(int n,bool ignoreStop) {
 	int i=IapReadWord(2+2*n);
-	while (!stop) {
+	while (ignoreStop || !stop) {
 		uint16_t t=IapReadWord(i),
 			duration=IapReadWord(i+2);
 		if (duration==0) break;
 		if (t!=0) {
 			tVal=t;
 			AUXR|=BV(4);
+			LED=1;
 		}
 		Delay1ms(duration);
 		AUXR&=~BV(4);
+		LED=0;
 		Delay1ms(50);
-		if (light()) break;
+		if (!ignoreStop && light()) break;
 		i+=4;
 	}
 }
@@ -144,26 +144,23 @@ void main(void) {
 	
 	nSongs=IapReadWord(0);
 	
+	play(0,true);
+	
 	for (;;) {
 		Delay1ms(200);		//wait for signal to stabilize
 		if (!light()) {
 			if (!firstRun) {
 				stop=false;
 				LED=1;
-				play();
+				int n=T2L^T2H;
+				while (n>=nSongs-1) n-=nSongs-1; //modulo without division (too much code bloat)
+				play(n,false);
 			}
 		}
 		else {
 			firstRun=false;
-			stop=false;
 			LED=0;
-			tVal=0xD4CD;
-			for (i=0;i<3 && !stop;i++) {
-				AUXR|=BV(4);
-				Delay1ms(70*i);
-				AUXR&=~BV(4);
-				Delay1ms(100);
-			}
+			play(0,true);	//shave and a haircut...
 		}
 		EX1=0;			//INT1 disable
 		LED=0;

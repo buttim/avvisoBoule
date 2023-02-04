@@ -1,9 +1,9 @@
 //!gcc -Wall -o "%name%.exe" "%file%"
 //!genEeprom
-//!srec_cat eeprom.bin -binary  -output eeprom.hex -Intel
 #include <stdio.h>
 #include <stdlib.h>
 #include "pitches.h"
+#include "shaveAndAHaircut.h"
 #include "brahmsLullaby.h"
 #include "elephantWalk.h"
 #include "FeroVecio.h"
@@ -29,7 +29,8 @@ note=0 means rest
 duration=0 means end
 ********************************************/
 	
-const short *songs[]={  
+const short *songs[]={
+	shaveAndAHaircut,
 	monferrina,
 	feroVecio,
 	//following melodies by Robson Couto (https://github.com/robsoncouto/arduino-songs)
@@ -82,7 +83,7 @@ int main(int argc,char *argv[]) {
 		fwrite(&t,sizeof(short),1,f);
 		fwrite(&t,sizeof(short),1,f);
 	}
-	printf("Written %d bytes\n",(int)ftell(f));
+	printf("%d bytes written to 'eeprom.bin'\n",(int)ftell(f));
 	fclose(f);
 	return 0;
 }
